@@ -1,19 +1,20 @@
 #!/bin/sh
 
-file="${1:-.}/allanime.xml"
-#header
-oldfile="$(cat $file)"
-printf '<?xml version="1.0" encoding="UTF-8" ?>\n<rss version="2.0">\n\n<channel>\n<title>Allanime (Sub) - RSS Feed</title>\n<link>https://github.com/coolnsx/anime-rss</link>\n<description>A simple RSS feed for allanime!</description>\n' > $file
-query="query(        \$search: SearchInput        \$limit: Int        \$page: Int        \$translationType: VaildTranslationTypeEnumType        \$countryOrigin: VaildCountryOriginEnumType    ) {    shows(        search: \$search        limit: \$limit        page: \$page        translationType: \$translationType        countryOrigin: \$countryOrigin    ) {        edges {            _id name lastEpisodeInfo __typename       }    }}"
+rss_file="${1:-.}/allanime.xml"
+currenttime="$(date -Ru)"
+description="A simple RSS feed using Anilist!"
 
-currenttime="$(date -Ru)" 
+data=$(printf "$(curl -s "https://graphql.anilist.co" -H "Content-Type: application/json" --data-raw '{"query":"query ($airingAt_greater: Int, $airingAt_lesser: Int) { Page(page: 1, perPage: 50) { airingSchedules(airingAt_greater: $airingAt_greater, airingAt_lesser: $airingAt_lesser, sort: TIME_DESC) { airingAt episode media { countryOfOrigin title { romaji } coverImage { extraLarge } } } } }","variables":{"airingAt_greater":'"$(date -d '24 hour ago' +%s)"',"airingAt_lesser":'"$(date +%s)"'}}' | sed 's/},{/\n/g' | sed -nE 's|.*"airingAt":([^,]*),"episode":([^,]*),"media".*"countryOfOrigin":"JP".*"romaji":"(.*)"\}.*"extraLarge":"(.*)"\}.*|\1\t\4\t\3 Episode \2|p')" | sed 's/\\//g')
+
+#header
+printf '<?xml version="1.0" encoding="UTF-8" ?>\n<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">\n\n<channel>\n<title>Anilist (Sub) - RSS Feed</title>\n<link>https://github.com/coolnsx/anime-rss</link>\n<description>%s Last Updated at %s</description>\n' "$description" "$currenttime" >"$rss_file"
 
 #content
-for i in $(curl -e 'https://allanime.to' -s -G "https://api.allanime.day/api" --data-urlencode 'variables={"search":{"sortBy":"Recent","allowAdult":true,"allowUnknown":true},"limit":40,"page":1,"translationType":"sub","countryOrigin":"JP"}' --data-urlencode 'query=query($search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) {edges { _id name lastEpisodeInfo __typename thumbnail}}}' -A "Mozilla/5.0" | sed 's|Show|\n|g' | sed -nE 's|.*_id":"([^"]*)","name":"([^"]*)".*sub":\{"episodeString":"([^"]*)".*|\1\t\2\tepisode \3 sub|p' | tr '[:punct:]' ' ' | tr -s ' ' | tr ' \t' '-/');do
-	title="$(printf "%s" "$i" | cut -d'/' -f2- | tr '[:punct:]' ' ' )"
-	epdate="$(printf '%s' "$oldfile" | grep -A3 "<title>${title}</title>" | grep "<pubDate>" | sed -E 's_<pubDate>([^<>]+)</pubDate>_\1_')"
-	printf '\n<item>\n<title>%s</title>\n<link>%s</link>\n<description>A simple RSS feed for allanime!</description>\n<pubDate>%s</pubDate>\n</item>\n' "$title" "https://allmanga.to/bangumi/$(printf "%s" "$i" | cut -d'/' -f1- | sed 's/episode/p/g')" "${epdate:-$currenttime}" >> $file
+printf '%s\n' "$data" | tr -s ' ' | tr ' \t' '-~' | while read -r line; do
+	title="$(printf "%s" "$line" | cut -d'~' -f3- | tr '[:punct:]' ' ' | tr -s ' ')"
+	epdate="$(date -Ru -d"@$(printf '%s' "$line" | cut -d'~' -f1)")"
+	thumburl=$(printf "%s" "$line" | cut -d'~' -f2)
+	printf '\n<item>\n<title>%s</title>\n<media:thumbnail url="%s" width="90" height="160" />\n<description>%s</description>\n<pubDate>%s</pubDate>\n</item>\n' "$title" "$thumburl" "$description" "${epdate:-$currenttime}" >>"$rss_file"
 done
 
-#footer
-printf "\n</channel>\n</rss>" >> $file
+printf "\n</channel>\n</rss>" >>"$rss_file"
